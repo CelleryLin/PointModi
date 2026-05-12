@@ -1,267 +1,335 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
-
 <head>
-    <meta charset="UTF-8" />
-    <title>Vector Interpolation Editor</title>
-    <style>
-        body {
-            font-family: Arial;
-            display: flex;
-            gap: 16px;
-            padding: 12px;
-        }
+<meta charset="UTF-8" />
+<title>Parametric Vector Editor</title>
 
-        canvas {
-            border: 1px solid #ccc;
-            cursor: pointer;
-        }
+<style>
+body {
+    font-family: Arial;
+    display: flex;
+    gap: 16px;
+    padding: 12px;
+}
 
-        .panel {
-            width: 260px;
-        }
+canvas {
+    border: 1px solid #ccc;
+    cursor: pointer;
+}
 
-        .panel input {
-            width: 100%;
-            margin-bottom: 8px;
-        }
+.panel {
+    width: 260px;
+}
 
-        label {
-            font-size: 12px;
-        }
+.panel input {
+    width: 100%;
+    margin-bottom: 8px;
+}
 
-        /* popup */
-        #popup {
-            position: absolute;
-            background: white;
-            border: 1px solid #aaa;
-            padding: 10px;
-            display: none;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-            z-index: 10;
-        }
-    </style>
+#popup {
+    position: absolute;
+    background: white;
+    border: 1px solid #aaa;
+    padding: 10px;
+    display: none;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+</style>
 </head>
 
 <body>
 
-    <div class="panel">
-        <h3>控制參數</h3>
+<div class="panel">
+<h3>控制參數</h3>
 
-        <label>點數 n</label>
-        <input id="n" type="number" value="20" oninput="resetAll()" />
+<label>n</label>
+<input id="n" type="number" value="20">
 
-        <label>P0.x</label>
-        <input id="x0" type="number" value="100" oninput="draw()" />
+<label>P0.x</label>
+<input id="x0" value="100">
 
-        <label>P0.y</label>
-        <input id="y0" type="number" value="100" oninput="draw()" />
+<label>P0.y</label>
+<input id="y0" value="100">
 
-        <label>Pn-1.x</label>
-        <input id="x1" type="number" value="600" oninput="draw()" />
+<label>P1.x</label>
+<input id="x1" value="600">
 
-        <label>Pn-1.y</label>
-        <input id="y1" type="number" value="150" oninput="draw()" />
+<label>P1.y</label>
+<input id="y1" value="150">
 
-        <hr />
+<hr>
+<p>點綠點(P) / 紅點(Q)</p>
+</div>
 
-        <p>👉 點擊 Qi 編輯</p>
-    </div>
+<canvas id="cv" width="700" height="450"></canvas>
 
-    <canvas id="cv" width="700" height="450"></canvas>
+<div id="popup">
 
-    <div id="popup">
-        <div>
-            <label>Length</label>
-            <input id="pl" type="number" />
-        </div>
-        <div>
-            <label>Angle (deg)</label>
-            <input id="pa" type="number" />
-        </div>
+<div id="editV">
+    <label>Length</label>
+    <input id="pl">
+    <label>Angle (deg)</label>
+    <input id="pa">
+</div>
 
-        <button onclick="applyEdit()">Apply</button>
-        <button onclick="closePopup()">Cancel</button>
-    </div>
+<div id="editP">
+    <label>t (0~1)</label>
+    <input id="pt" min="0" max="1" step="0.01">
+</div>
 
-    <script>
-        const cv = document.getElementById("cv");
-        const ctx = cv.getContext("2d");
-        const popup = document.getElementById("popup");
+<button id="apply">Apply</button>
+<button id="cancel">Cancel</button>
 
-        let V = [];
-        let selected = -1;
+</div>
 
-        function lerp(a, b, t) { return a + (b - a) * t; }
-        function quad(l0, l1, t) { return l0 - ((l0 - l1) * t * t); }
+<script>
 
-        function resetAll() {
-            selected = -1;
-            buildAll();
-            draw();
-        }
+// ---------------- DOM ----------------
+const dom = {
+    n: document.getElementById("n"),
+    x0: document.getElementById("x0"),
+    y0: document.getElementById("y0"),
+    x1: document.getElementById("x1"),
+    y1: document.getElementById("y1"),
 
-        function buildAll() {
-            const n = +document.getElementById("n").value;
+    canvas: document.getElementById("cv"),
+    ctx: document.getElementById("cv").getContext("2d"),
 
-            const P0 = { x: +x0.value, y: +y0.value };
-            const P1 = { x: +x1.value, y: +y1.value };
+    popup: document.getElementById("popup"),
 
-            const V0 = { l: 120, a: 45 * Math.PI / 180 };
-            const V1 = { l: 30, a: 20 * Math.PI / 180 };
+    pl: document.getElementById("pl"),
+    pa: document.getElementById("pa"),
+    pt: document.getElementById("pt"),
 
-            V = [];
+    editV: document.getElementById("editV"),
+    editP: document.getElementById("editP"),
 
-            for (let i = 0; i < n; i++) {
-                const t = i / (n - 1);
+    apply: document.getElementById("apply"),
+    cancel: document.getElementById("cancel"),
+};
 
-                V.push({
-                    l: quad(V0.l, V1.l, t),
-                    a: lerp(V0.a, V1.a, t)
-                });
-            }
-        }
+// ---------------- STATE ----------------
+const state = {
+    V: [],
+    T: [],       // 🔥 存 t
+    selected: -1,
+    mode: "V"
+};
 
-        function rebuildFrom(k) {
-            const n = V.length - k;
-            const V1 = V[V.length - 1];
-            for (let i = 0; i < n; i++) {
-                const t = i / ((n - 1) + 10e-6);
-                V[k + i].l = quad(V[k].l, V1.l, t);
-                V[k + i].a = lerp(V[k].a, V1.a, t);
-            }
-        }
+// ---------------- UTIL ----------------
+const lerp = (a,b,t)=>a+(b-a)*t;
+const quad = (l0,l1,t)=>l0-(l0-l1)*t*t;
 
-        function draw() {
-            const n = V.length;
+// ---------------- BUILD ----------------
+function build(){
 
-            const P0 = { x: +x0.value, y: +y0.value };
-            const P1 = { x: +x1.value, y: +y1.value };
+    const n = +dom.n.value;
 
-            ctx.clearRect(0, 0, cv.width, cv.height);
+    state.V = [];
+    state.T = [];
 
-            ctx.strokeStyle = "#aaa";
-            ctx.beginPath();
-            ctx.moveTo(P0.x, P0.y);
-            ctx.lineTo(P1.x, P1.y);
-            ctx.stroke();
+    const V0 = {l:120, a:45*Math.PI/180};
+    const V1 = {l:30,  a:20*Math.PI/180};
 
-            for (let i = 0; i < n; i++) {
-                const t = i / (n - 1);
+    for(let i=0;i<n;i++){
+        const t = i/(n-1);
 
-                const P = {
-                    x: lerp(P0.x, P1.x, t),
-                    y: lerp(P0.y, P1.y, t)
-                };
+        state.T.push(0);
 
-                const Vi = V[i];
-
-                const Q = {
-                    x: P.x + Math.cos(Vi.a) * Vi.l,
-                    y: P.y + Math.sin(Vi.a) * Vi.l
-                };
-
-                // highlight
-                ctx.strokeStyle = (i === selected) ? "orange" : "blue";
-                ctx.lineWidth = (i === selected) ? 3 : 1;
-
-                ctx.beginPath();
-                ctx.moveTo(P.x, P.y);
-                ctx.lineTo(Q.x, Q.y);
-                ctx.stroke();
-
-                ctx.fillStyle = "green";
-                ctx.beginPath();
-                ctx.arc(P.x, P.y, 2, 0, Math.PI * 2);
-                ctx.fill();
-
-                ctx.fillStyle = (i === selected) ? "orange" : "red";
-                ctx.beginPath();
-                ctx.arc(Q.x, Q.y, 4, 0, Math.PI * 2);
-                ctx.fill();
-
-                V[i]._Q = Q;
-            }
-        }
-
-        /* ---------------- popup control ---------------- */
-
-        function openPopup(i, x, y) {
-            popup.style.left = x + "px";
-            popup.style.top = y + "px";
-            popup.style.display = "block";
-
-            pl.value = V[i].l;
-            pa.value = V[i].a * 180 / Math.PI;
-        }
-
-        function closePopup() {
-            popup.style.display = "none";
-            selected = -1;
-            draw();
-        }
-
-        function applyEdit() {
-            if (selected < 0) return;
-
-            const i = selected;
-
-            V[i].l = +pl.value;
-            V[i].a = +pa.value * Math.PI / 180;
-
-            rebuildFrom(i);
-            draw();
-
-            closePopup();
-        }
-
-        /* ---------------- interaction ---------------- */
-
-        cv.addEventListener("click", (e) => {
-            const rect = cv.getBoundingClientRect();
-            const mx = e.clientX - rect.left;
-            const my = e.clientY - rect.top;
-
-            let best = -1;
-            let bestD = 1e9;
-
-            for (let i = 0; i < V.length; i++) {
-                const q = V[i]._Q;
-                const d = (q.x - mx) ** 2 + (q.y - my) ** 2;
-
-                if (d < bestD && d < 120) {
-                    bestD = d;
-                    best = i;
-                }
-            }
-
-            if (best >= 0) {
-                selected = best;
-                openPopup(best, e.clientX, e.clientY);
-            } else {
-                closePopup();
-            }
-
-            draw();
+        state.V.push({
+            l: quad(V0.l,V1.l,t),
+            a: lerp(V0.a,V1.a,t)
         });
+    }
+}
 
-        /* 點 popup 外關閉 */
-        document.addEventListener("click", (e) => {
-            if (popup.style.display === "none") return;
+// ---------------- P ----------------
+function getP(i){
 
-            const isPopup = popup.contains(e.target);
-            const isCanvas = e.target === cv;
+    const n = state.T.length;
+    const t = (i+state.T[i])/(n-1 + 1e-6);
 
-            if (!isPopup && !isCanvas) {
-                closePopup();
-            }
-        });
+    return {
+        x: lerp(+dom.x0.value, +dom.x1.value, t),
+        y: lerp(+dom.y0.value, +dom.y1.value, t)
+    };
+}
 
-        /* init */
-        buildAll();
+// ---------------- V ----------------
+function rebuildV(k){
+
+    const n = state.V.length;
+    const Vend = state.V[n-1];
+
+    for(let i=k;i<n;i++){
+        const adj_k = (k+state.T[k]);
+        const adj_i = (i+state.T[i]);
+        const t = (adj_i-adj_k)/(n-1-adj_k + 1e-6);
+
+        state.V[i].l = quad(state.V[k].l, Vend.l, t);
+        state.V[i].a = lerp(state.V[k].a, Vend.a, t);
+    }
+}
+
+// ---------------- DRAW ----------------
+function draw(){
+
+    const ctx = dom.ctx;
+    const n = state.V.length;
+
+    ctx.clearRect(0,0,700,450);
+
+    const P0 = {x:+dom.x0.value, y:+dom.y0.value};
+    const P1 = {x:+dom.x1.value, y:+dom.y1.value};
+
+    ctx.strokeStyle="#aaa";
+    ctx.beginPath();
+    ctx.moveTo(P0.x,P0.y);
+    ctx.lineTo(P1.x,P1.y);
+    ctx.stroke();
+
+    for(let i=0;i<n;i++){
+
+        const P = getP(i);
+        const V = state.V[i];
+
+        const Q = {
+            x: P.x + Math.cos(V.a)*V.l,
+            y: P.y + Math.sin(V.a)*V.l
+        };
+
+        ctx.strokeStyle = (i===state.selected)?"orange":"blue";
+        ctx.lineWidth = (i===state.selected)?3:1;
+
+        ctx.beginPath();
+        ctx.moveTo(P.x,P.y);
+        ctx.lineTo(Q.x,Q.y);
+        ctx.stroke();
+
+        ctx.fillStyle="green";
+        ctx.beginPath();
+        ctx.arc(P.x,P.y,3,0,Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle=(i===state.selected)?"orange":"red";
+        ctx.beginPath();
+        ctx.arc(Q.x,Q.y,4,0,Math.PI*2);
+        ctx.fill();
+
+        state.V[i]._P = P;
+        state.V[i]._Q = Q;
+    }
+}
+
+// ---------------- POPUP ----------------
+function openPopup(i,x,y){
+
+    dom.popup.style.left = x+"px";
+    dom.popup.style.top = y+"px";
+    dom.popup.style.display = "block";
+
+    if(state.mode==="V"){
+        dom.editV.style.display="block";
+        dom.editP.style.display="none";
+
+        dom.pl.value = state.V[i].l;
+        dom.pa.value = state.V[i].a*180/Math.PI;
+    }else{
+        dom.editV.style.display="none";
+        dom.editP.style.display="block";
+
+        dom.pt.value = state.T[i];
+    }
+}
+
+function closePopup(){
+    dom.popup.style.display="none";
+    state.selected = -1;
+    draw();
+}
+
+// ---------------- APPLY ----------------
+dom.apply.onclick = ()=>{
+
+    const i = state.selected;
+    if(i<0) return;
+
+    if(state.mode==="V"){
+        state.V[i].l = +dom.pl.value;
+        state.V[i].a = +dom.pa.value*Math.PI/180;
+        rebuildV(i);
+    }else{
+        state.T[i] = Math.max(-1, Math.min(1, +dom.pt.value));
+    }
+
+    draw();
+    closePopup();
+};
+
+dom.cancel.onclick = closePopup;
+
+// ---------------- CLICK ----------------
+dom.canvas.addEventListener("click",(e)=>{
+
+    const rect = dom.canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    let best=-1;
+    let bestD=1e9;
+
+    for(let i=0;i<state.V.length;i++){
+
+        const p = state.V[i]._P;
+        const q = state.V[i]._Q;
+
+        const dp = (p.x-mx)**2+(p.y-my)**2;
+        const dq = (q.x-mx)**2+(q.y-my)**2;
+
+        if(dp<bestD && dp<100){
+            bestD=dp;
+            best=i;
+            state.mode="P";
+        }
+
+        if(dq<bestD && dq<100){
+            bestD=dq;
+            best=i;
+            state.mode="V";
+        }
+    }
+
+    if(best>=0){
+        state.selected = best;
+        openPopup(best,e.clientX,e.clientY);
+    }else{
+        closePopup();
+    }
+
+    draw();
+});
+
+// outside click
+document.addEventListener("click",(e)=>{
+    if(dom.popup.style.display==="none") return;
+    if(!dom.popup.contains(e.target) && e.target!==dom.canvas){
+        closePopup();
+    }
+});
+
+// input update
+["n","x0","y0","x1","y1"].forEach(id=>{
+    dom[id].addEventListener("input",()=>{
+        build();
         draw();
-    </script>
+    });
+});
+
+// init
+build();
+draw();
+
+</script>
 
 </body>
-
 </html>
